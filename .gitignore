@@ -1,0 +1,13 @@
+# Local data and financials
+data.json
+*_financials/
+*.csv
+
+# Python environment and cache
+__pycache__/
+*.py[cod]
+.venv/
+.env
+
+# Editor settings
+.vscode/
