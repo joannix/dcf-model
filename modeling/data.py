@@ -7,7 +7,7 @@ import json
 import pandas as pd
 import os
 import time
-from json_to_csv import convert_json_to_csv 
+from modeling.json_to_csv import convert_json_to_csv
 
 # --- FUNCTION DEFINITIONS (The Machines) ---
 
@@ -45,6 +45,8 @@ def fetch_financials(ticker, apikey):
     with open(file_path, 'w') as f:
         json.dump(master_data, f, indent=4)
     print(f"\n--- DONE: Master data updated in {file_path} ---")
+
+    return master_data
 
 def create_assumption_template(ticker, output_folder):
     assumption_path = os.path.join(output_folder, f"{ticker}_assumptions.csv")
