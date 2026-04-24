@@ -11,3 +11,7 @@ __pycache__/
 
 # Editor settings
 .vscode/
+
+# Untracked Project Folders
+imgs/
+visualization/
