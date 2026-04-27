@@ -1,6 +1,6 @@
 # Local data and financials
+output/
 data.json
-*_financials/
 *.csv
 
 # Python environment and cache
@@ -10,8 +10,8 @@ __pycache__/
 .env
 
 # Editor settings
-.vscode/
+.vscode/ 
 
-# Untracked Project Folders
+# Untracked Project Folders (Local Improvements)
 imgs/
 visualization/

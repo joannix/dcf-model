@@ -2,12 +2,13 @@ import pandas as pd
 import json
 import os
 
-# --- THE MATH ENGINE ---
+# --- 1 THE MATH ENGINE ---
 
 def ulFCF(ebit, tax_rate, da, cwc, capex):
     """Calculates Unlevered Free Cash Flow"""
     return ebit * (1 - tax_rate) + da - cwc - abs(capex)
 
+# --- 2 CORE ENGINE ---
 def enterprise_value(income_statement, cashflow_statement, balance_statement, period, discount_rate, earnings_growth_rate, cap_ex_growth_rate, perpetual_growth_rate):
     """Calculates Enterprise Value using DCF method"""
     
@@ -61,7 +62,46 @@ def enterprise_value(income_statement, cashflow_statement, balance_statement, pe
         "projections": pd.DataFrame(projection_data),
         "tv_pct": (pv_terminal_value / total_ev) * 100
     }
+# --- 3 SENSITIVITY ENGINE ---
+def run_sensitivity_analysis(income_stmt, cash_stmt, balance_stmt, assumptions, debt, cash, shares):
+    """
+    Runs multiple DCF scenarios by varying WACC and Perpetual Growth.
+    Returns a DataFrame grid of share prices.
+    """
+    # 1. Define the ranges (Current, -1%, +1% for WACC | Current, -0.5%, +0.5% for Growth)
+    wacc_range = [round(assumptions['wacc'] - 0.01, 3), 
+                  round(assumptions['wacc'], 3), 
+                  round(assumptions['wacc'] + 0.01, 3)]
+    
+    growth_range = [round(assumptions['perpetual_growth'] - 0.005, 3), 
+                    round(assumptions['perpetual_growth'], 3), 
+                    round(assumptions['perpetual_growth'] + 0.005, 3)]
+    
+    results_grid = []
 
+    # 2. Nested loop to calculate every combination
+    for w in wacc_range:
+        row = {"WACC / Growth": f"{w*100:.1f}%"}
+        for g in growth_range:
+            # Re-run the core math engine for each scenario
+            res = enterprise_value(
+                income_stmt, cash_stmt, balance_stmt,
+                period=int(assumptions['forecast_years']),
+                discount_rate=w,
+                earnings_growth_rate=assumptions['ebit_growth'],
+                cap_ex_growth_rate=assumptions['capex_growth'],
+                perpetual_growth_rate=g
+            )
+            # Calculate price using the Equity Bridge
+            price = (res['ev'] - debt + cash) / shares
+            row[f"{g*100:.1f}%"] = round(price, 2)
+        
+        results_grid.append(row)
+
+    # 3. Convert list of dicts to a clean table
+    return pd.DataFrame(results_grid)
+
+# --- 4 DATA LOADERS ---
 def load_user_assumptions(ticker, folder):
     """The Smart Socket for Polish Excel Files"""
     path = os.path.join(folder, f"{ticker}_assumptions.csv")
@@ -83,7 +123,7 @@ def load_user_assumptions(ticker, folder):
         print(f"❌ Error reading assumptions: {e}")
         return None
 
-# --- EXECUTION BLOCK ---
+# --- 5 EXECUTION BLOCK ---
 
 if __name__ == "__main__":
     ticker = 'AMZN'
@@ -108,21 +148,26 @@ if __name__ == "__main__":
         )
 
         # Equity Bridge
-        ev_stmt = master_data['enterprise_value_statement'][0]
-        debt = float(ev_stmt.get('totalDebt', 0))
-        cash = float(ev_stmt.get('cashAndCashEquivalents', 0))
+        bal_stmt = master_data['balance_statement'][0] # Source of Truth for Debt/Cash
+        ev_stmt = master_data['enterprise_value_statement'][0] # Source of Truth for Shares
+        # Pull from Balance Sheet
+        debt = float(bal_stmt.get('totalDebt', 0))
+        cash = float(bal_stmt.get('cashAndCashEquivalents', 0))
+        
+        # Pull from EV Statement
         shares = float(ev_stmt.get('numberOfShares', 1))
         
+        # Calculate
         equity_val = results['ev'] - debt + cash
-        price = equity_val / shares
-
+        intrinsic_price = equity_val / shares
+        
         # Save Report
         save_path = os.path.join(folder, f"valuation_output_{ticker}.csv")
         with open(save_path, 'w', newline='') as f:
             f.write("sep=,\n")
-            f.write(f"Intrinsic Price,{price:.2f}\n")
+            f.write(f"Intrinsic Price,{intrinsic_price:.2f}\n") # <--- Fixed name
             f.write(f"TV Contribution,{results['tv_pct']:.2f}%\n\n")
             results['projections'].to_csv(f, index=False)
         
         print(f"✅ Analysis complete for {ticker}")
-        print(f"   Intrinsic Value: ${price:.2f}")
+        print(f"   Intrinsic Value: ${intrinsic_price:.2f}") # <--- Fixed name
