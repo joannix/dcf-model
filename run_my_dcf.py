@@ -2,8 +2,13 @@ import os
 import json
 import argparse
 import pandas as pd
+from dotenv import load_dotenv
+
 from modeling.data import fetch_financials, convert_json_to_csv, create_assumption_template
-from modeling.dcf import enterprise_value, load_user_assumptions
+from modeling.dcf import enterprise_value, load_user_assumptions, run_sensitivity_analysis
+
+load_dotenv()  
+ENV_API_KEY = os.getenv("FMP_API_KEY")
 
 # --- HELPER: LOADS DATA FROM STAGE 1 ---
 def load_local_data(ticker, folder):
@@ -17,34 +22,29 @@ def load_local_data(ticker, folder):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--t', help='Stock Ticker', default='AAPL')
-    parser.add_argument('--apikey', help='API Key', default=None)
+    parser.add_argument('--apikey', help="FMP API Key")
     parser.add_argument('--mode', choices=['setup', 'run'], default='setup', 
                         help='setup: downloads data | run: calculates valuation')
     args = parser.parse_args()
 
+    active_api_key = args.apikey or ENV_API_KEY
+
     ticker = args.t.upper()
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # NEW STRUCTURE: dcf-model/output/KO/
     output_folder = os.path.join(script_dir, "output", ticker)
-
-    # Ensure the output directory exists
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder, exist_ok=True)
+    os.makedirs(output_folder, exist_ok=True)
     
     # --- STAGE 1: SETUP ---
     if args.mode == 'setup':
-        if not args.apikey:
-            print("❌ ERROR: You must provide an --apikey to run 'setup' mode!")
+        
+        if not active_api_key:
+            print("❌ ERROR: No API Key found! Provide --apikey or set FMP_API_KEY in .env")
             return 
         
         print(f"--- 🛠️ STAGE 1: SETUP MODE ({ticker}) ---")
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
         
-        master_data = fetch_financials(ticker, args.apikey, output_folder)
+        master_data = fetch_financials(ticker, active_api_key, output_folder)
         
-        # Ensure the data is saved in the ticker-specific folder
         convert_json_to_csv(ticker, output_folder) 
         create_assumption_template(ticker, output_folder)
         
@@ -64,9 +64,7 @@ def main():
             print("❌ Error: Missing local data or assumptions. Run --mode setup first.")
             return
 
-        # 2. RUN CORE DCF MATH
-        from modeling.dcf import enterprise_value, run_sensitivity_analysis
-            
+        # 2. RUN CORE DCF MATH       
         results = enterprise_value(
             master_data['income_statement'],
             master_data['cashflow_statement'],
@@ -125,7 +123,7 @@ def main():
         print(f"  🔍 Price Source:  {price_source}") # Tells you where the price came from
         print("="*45)
 
-        # This is the "Bridge" section
+        # "Equity Bridge" section
         print(f"  Enterprise Value:     ${results['ev']/1e9:.2f}B")
         print(f"  (+) Cash:             ${cash/1e9:.2f}B")
         print(f"  (-) Total Debt:       ${debt/1e9:.2f}B")
@@ -136,7 +134,6 @@ def main():
         print(f"  ✨ INTRINSIC PRICE:    ${intrinsic_price:.2f}")
         print(f"  📉 MARKET PRICE:       ${market_price:.2f}")
         
-        # Calculate Upside/Downside
         if market_price > 0:
             upside = ((intrinsic_price / market_price) - 1) * 100
             print(f"  🚀 UPSIDE/(DOWNSIDE):  {upside:.2f}%")
@@ -158,7 +155,7 @@ def main():
         # 7. SAVE TO DISK
         save_path = os.path.join(output_folder, f"valuation_output_{ticker}.csv")
         with open(save_path, 'w', newline='') as f:
-            # This line tells Excel: "Hey, I'm using commas!"
+            # This line tells Excel: "Hey, I'm using commas!" (European format)
             f.write("sep=,\n") 
             
             upside_val = ((intrinsic_price / market_price) - 1) * 100 if market_price > 0 else 0
@@ -166,7 +163,6 @@ def main():
             f.write(f"{ticker},{intrinsic_price:.2f},{market_price:.2f},{upside_val:.2f}%,{equity_val:.2f},{results['ev']:.2f},{debt:.2f},{cash:.2f}\n\n")
             f.write("--- SENSITIVITY ANALYSIS ---\n")
             
-            # Save the dataframe below the summary
             sensitivity_df.to_csv(f, index=False)
             
         print(f"✅ Report saved to: {save_path}")
