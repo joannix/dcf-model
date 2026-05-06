@@ -13,5 +13,5 @@ __pycache__/
 .vscode/ 
 
 # Untracked Project Folders (Local Improvements)
-imgs/
+visualizations/
 visualization/

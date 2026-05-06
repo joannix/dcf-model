@@ -52,7 +52,3 @@ Follow these three steps to generate a valuation:
     Calculate the intrinsic value based on your custom assumptions:
     ```powershell
     python run_my_dcf.py --t KO --mode run
-
-
-
-
