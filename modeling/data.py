@@ -39,8 +39,7 @@ def convert_json_to_csv(ticker, folder):
                 csv_path = os.path.join(folder, f"{ticker}_{key}.csv")
                 
                 with open(csv_path, 'w', encoding='utf-8', newline='') as f:
-                    f.write("sep=,\n") 
-                    df_transposed.to_csv(f, index=True)
+                    df_transposed.to_csv(f, index=True, sep=';')
                 print(f"   ✅ Saved: {ticker}_{key}.csv")
             except Exception as e:
                 print(f"   ⚠️ Could not convert {key}: {e}")
@@ -57,12 +56,14 @@ def fetch_financials(ticker, apikey, folder):
         print(f"📂 Created new directory: {folder}")
 
     base_url = "https://financialmodelingprep.com/stable"
+    v3_url = "https://financialmodelingprep.com/api/v3"
     endpoints = {
         "income_statement": f"{base_url}/income-statement?symbol={ticker}&period=annual&apikey={apikey}",
         "balance_statement": f"{base_url}/balance-sheet-statement?symbol={ticker}&period=annual&apikey={apikey}",
         "cashflow_statement": f"{base_url}/cash-flow-statement?symbol={ticker}&period=annual&apikey={apikey}",
         "enterprise_value_statement": f"{base_url}/enterprise-values?symbol={ticker}&period=annual&apikey={apikey}",
-        "quote": f"https://financialmodelingprep.com/api/v3/quote-short/{ticker}?apikey={apikey}"
+        "quote": f"{v3_url}/quote/{ticker}?apikey={apikey}",
+        "profile": f"{v3_url}/profile/{ticker}?apikey={apikey}"
     }
         
     master_data = {"metadata": {"ticker": ticker, "retrieved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}}
@@ -87,21 +88,24 @@ def fetch_financials(ticker, apikey, folder):
 
 # --- 3. THE TEMPLATER ---
 
-def create_assumption_template(ticker, output_folder):
+def create_assumption_template(ticker, output_folder, company_name="Unknown"):
     """Creates the starter CSV for growth and WACC assumptions"""
     assumption_path = os.path.join(output_folder, f"{ticker}_assumptions.csv")
     if os.path.exists(assumption_path):
         return
 
     data = {
-        "Assumption": ["ebit_growth", "capex_growth", "wacc", "perpetual_growth", "forecast_years"],
-        "Value": [0.15, 0.05, 0.085, 0.02, 5],
-        "Description": ["EBIT growth", "CapEx growth", "WACC", "Terminal Growth", "Years"]
+        "Assumption": ["revenue_growth", "ebit_margin_delta", "capex_growth", "wacc", "perpetual_growth", "forecast_years"],
+        "Value": [0.05, 0.0, 0.05, 0.085, 0.02, 5],
+        "Description": ["revenue growth", "EBIT margin delta", "CapEx growth", "WACC", "Terminal Growth", "Years"]
     }
     df = pd.DataFrame(data)
-    with open(assumption_path, 'w', encoding='utf-8', newline='') as f:
-        f.write("sep=,\n")
-        df.to_csv(f, index=False)
+
+    with open(assumption_path, 'w', newline='', encoding='utf-8') as f:
+        f.write(f"Company Name;{company_name}\n")
+        f.write(f"Ticker;{ticker}\n")
+        f.write("\n")
+        df.to_csv(f, index=False, sep=';')
 
 # --- 4. LOCAL TESTING BLOCK ---
 

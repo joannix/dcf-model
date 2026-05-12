@@ -45,8 +45,17 @@ def main():
         
         master_data = fetch_financials(ticker, active_api_key, output_folder)
         
+        profile_data = master_data.get('profile', [])
+        print(f"DEBUG: Raw Profile Data: {profile_data}")
+        full_name = ticker 
+        
+        if profile_data and isinstance(profile_data, list) and len(profile_data) > 0:
+            full_name = profile_data[0].get('companyName', ticker)
+        else: 
+            full_name = ticker
+
         convert_json_to_csv(ticker, output_folder) 
-        create_assumption_template(ticker, output_folder)
+        create_assumption_template(ticker, output_folder, company_name=full_name)
         
         print(f"\n✅ Setup Complete! Now go to {output_folder}")
         print(f"👉 Edit '{ticker}_assumptions.csv' and save your changes.")
@@ -59,6 +68,8 @@ def main():
         # 1. LOAD DATA & ASSUMPTIONS
         master_data = load_local_data(ticker, output_folder)
         assumptions = load_user_assumptions(ticker, output_folder)
+        full_name = assumptions.get('company_name_display', ticker)
+        print(f"✅ Valuation for: {full_name}")
             
         if not master_data or not assumptions:
             print("❌ Error: Missing local data or assumptions. Run --mode setup first.")
@@ -71,9 +82,10 @@ def main():
             master_data['balance_statement'],
             period=int(assumptions['forecast_years']),
             discount_rate=assumptions['wacc'],
-            earnings_growth_rate=assumptions['ebit_growth'],
+            earnings_growth_rate=assumptions['revenue_growth'],
             cap_ex_growth_rate=assumptions['capex_growth'],
-            perpetual_growth_rate=assumptions['perpetual_growth']
+            perpetual_growth_rate=assumptions['perpetual_growth'],
+            assumptions=assumptions                             #
         )
 
         # --- 3. EQUITY BRIDGE ---
@@ -154,18 +166,57 @@ def main():
 
         # 7. SAVE TO DISK
         save_path = os.path.join(output_folder, f"valuation_output_{ticker}.csv")
-        with open(save_path, 'w', newline='') as f:
-            # This line tells Excel: "Hey, I'm using commas!" (European format)
-            f.write("sep=,\n") 
+        full_name = assumptions.get('company_full_name', ticker)
+        with open(save_path, 'w', newline='', encoding='utf-8') as f:
+            f.write(f"Company Name;{full_name}\n") 
+            f.write(f"Ticker;{ticker}\n")
+            f.write(f"Intrinsic Price;{intrinsic_price:.2f}\n")
+            f.write(f"Market Price;{market_price:.2f}\n")
+            f.write("\n") 
             
+            f.write("--- FORECAST DATA ---\n")
+            results['projections'].to_csv(f, index=False, sep=';')
+            f.write("\n")
+
+            f.write("--- VALUATION RESULTS ---\n")
+            f.write(f"Intrinsic Price;{intrinsic_price:.2f}\n")
+            f.write(f"Market Price;{market_price:.2f}\n")
+            f.write(f"Upside/Downside;{upside:.2%}\n")
+            f.write("\n")
             upside_val = ((intrinsic_price / market_price) - 1) * 100 if market_price > 0 else 0
-            f.write(f"Ticker,Intrinsic Price,Market Price,Upside %,Equity Value,EV,Debt,Cash\n")
-            f.write(f"{ticker},{intrinsic_price:.2f},{market_price:.2f},{upside_val:.2f}%,{equity_val:.2f},{results['ev']:.2f},{debt:.2f},{cash:.2f}\n\n")
+            f.write("--- EQUITY BRIDGE COMPONENTS ---\n")
+            f.write(f"Enterprise Value (EV);{results['ev']:.2f}\n")
+            f.write(f"Add: Cash;{cash:.2f}\n")
+            f.write(f"Less: Total Debt;{debt:.2f}\n")
+            f.write(f"Equity Value;{equity_val:.2f}\n")
+            f.write(f"Shares Outstanding;{shares_outstanding:.2f}\n")
+            f.write("\n")    
+                        
             f.write("--- SENSITIVITY ANALYSIS ---\n")
             
-            sensitivity_df.to_csv(f, index=False)
+            sensitivity_df.to_csv(f, index=False, sep=';')
             
         print(f"✅ Report saved to: {save_path}")
+       
+        # --- 6. DATA FOR CHARTS ---
+        chart_data = {
+            "ticker": ticker,
+            "ebit_history": results['ebit_history'],
+            "ebit_hist_years": results['ebit_hist_years'],
+            "ebit_forecast": results['ebit_forecast'],
+            "ebit_forecast_years": results['ebit_forecast_years'],
+            "forecast_years": results.get('years', ["Y1", "Y2", "Y3", "Y4", "Y5"]),
+            "forecast_fcf": results.get('fcf_projections', [0, 0, 0, 0, 0]),
+            "pv_forecast_sum": results.get('pv_sum', 0),
+            "pv_terminal_value": results.get('pv_tv', 0),
+            "cash": cash,
+            "debt": debt,
+            "equity_value": equity_val
+        }
+        
+        with open(os.path.join(output_folder, "chart_data.json"), 'w') as jf:
+            json.dump(chart_data, jf, indent=4) 
+            print(f"✅ Chart data prepared at: {os.path.join(output_folder, 'chart_data.json')}")
 
 if __name__ == "__main__":
     main()
