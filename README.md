@@ -36,6 +36,7 @@ Data is organized by ticker within the output directory:
 - `output/<ticker>/data.json` — Raw API response
 - `output/<ticker>/assumptions_<ticker>.csv` — **User-editable** inputs
 - `output/<ticker>/valuation_output_<ticker>.csv` — Final report
+
 Charts are organized by ticker within the visualizations directory:
 - `visualizations/<ticker>/projections.png` — Bar Charts for Cash Flows
 - `visualizations/<ticker>/valuation_bridge.png` — Waterfall Chart for Valuation Bridge
