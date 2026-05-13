@@ -4,6 +4,7 @@ import json
 import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 def get_output_path(ticker):
     """Creates a ticker-specific subfolder inside visualizations."""
@@ -12,6 +13,29 @@ def get_output_path(ticker):
     if not os.path.exists(ticker_dir):
         os.makedirs(ticker_dir)
     return ticker_dir
+
+def style_financial_chart(ax, title, ylabel):
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+    ax.set_ylabel(ylabel, fontsize=12)
+    ax.set_xlabel("Year", fontsize=12)
+    sns.despine() # Removes the top and right border lines
+    plt.tight_layout()
+
+def plot_ebit_growth(ticker, hist_years, hist_ebit, fore_years, fore_ebit):
+    sns.set_theme(style="darkgrid")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    all_years = hist_years + fore_years
+    all_ebit = [(x / 1e9) for x in (hist_ebit + fore_ebit)]
+    
+    colors = ['#2c3e50'] * len(hist_years) + ['#3498db'] * len(fore_years)
+    
+    sns.barplot(x=all_years, y=all_ebit, hue=all_years, palette=colors, legend=False, ax=ax)
+    
+    style_financial_chart(ax, f"{ticker}: Historical & Forecasted EBIT", "EBIT (Billions $)")
+    
+    plt.savefig(os.path.join(get_output_path(ticker), "ebit_growth.png"), dpi=300)
+    plt.close()
 
 def save_projections(ticker, years, flows):
     ticker_dir = get_output_path(ticker)
@@ -64,25 +88,27 @@ def save_valuation_bridge(ticker, pv_forecast, pv_tv, cash, debt):
     plt.savefig(os.path.join(ticker_dir, "valuation_bridge.png"), dpi=300)
     plt.close()
 
-def save_ebit_chart(ticker, hist_years, hist_ebit, fore_years, fore_ebit):
+def plot_price_vs_target(ticker, historical_prices, target_price):
+    """
+    Visualizes the stock's historical journey compared to our DCF target.
+    historical_prices: A list or Series of past closing prices
+    target_price: The intrinsic value
+    """
+    sns.set_theme(style="darkgrid")
     plt.figure(figsize=(10, 6))
     
-    # Combine data
-    all_years = hist_years + fore_years
-    all_ebit = [x/1e9 for x in hist_ebit] + [x/1e9 for x in fore_ebit]
+    # Plot historical line
+    plt.plot(historical_prices, label='Market Price', color='royalblue', linewidth=2)
     
-    # Color history differently than forecast
-    colors = ['#2c3e50'] * len(hist_years) + ['#3498db'] * len(fore_years)
+    # Plot horizontal "Intrinsic Value" line
+    plt.axhline(y=target_price, color='crimson', linestyle='--', label=f'Target: ${target_price:.2f}')
     
-    plt.bar(all_years, all_ebit, color=colors)
-    plt.title(f"{ticker}: Historical & Forecasted EBIT", fontsize=14)
-    plt.ylabel("EBIT (Billions $)")
-    plt.xticks(rotation=45)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    
-    output_dir = f"visualizations/{ticker}"
-    os.makedirs(output_dir, exist_ok=True)
-    plt.savefig(f"{output_dir}/{ticker}_ebit_trend.png")
+    plt.title(f"${ticker} Market History vs. DCF Intrinsic Value")
+    plt.xlabel("Days (Last 5 Years)")
+    plt.ylabel("Price ($)")
+    plt.legend()
+
+    plt.savefig(os.path.join(get_output_path(ticker), "market_comparison.png"), dpi=300)
     plt.close()
     
 if __name__ == "__main__":
@@ -94,28 +120,39 @@ if __name__ == "__main__":
     path = os.path.join("output", ticker, "chart_data.json")
     
     if os.path.exists(path):
+        ticker_dir = get_output_path(ticker)
+        for f in os.listdir(ticker_dir):
+            if f.endswith(".png"):
+                os.remove(os.path.join(ticker_dir, f))
+
         with open(path, 'r') as f:
             data = json.load(f)
         
         print(f"✅ Real data loaded for {ticker}")
 
-        save_projections(
-            ticker, 
-            data['forecast_years'], 
-            data['forecast_fcf']
-        )
+        save_projections(ticker, data['forecast_years'], data['forecast_fcf'])
         
-        save_valuation_bridge(
-            ticker, 
-            data['pv_forecast_sum'], 
-            data['pv_terminal_value'], 
-            data['cash'], 
-            data['debt']
-        )
+        save_valuation_bridge(ticker, data['pv_forecast_sum'], data['pv_terminal_value'], data['cash'], data['debt'])
         
-        print(f"🚀 Success! Charts generated for {ticker} in /visualizations")
+        plot_ebit_growth(
+            ticker, 
+            data.get('ebit_hist_years', []), 
+            data.get('ebit_history', []), 
+            data.get('ebit_forecast_years', []), 
+            data.get('ebit_forecast', [])
+        )
+
+        if 'price_history' in data:
+            plot_price_vs_target(
+                data['ticker'], 
+                data['price_history'], 
+                data['intrinsic_price'], 
+            )
+                   
+        print(f"🚀 Success! Charts generated for {ticker} in /visualizations/{ticker}")
         
     else:
         print(f"❌ No data found for {ticker}. Run the valuation first.")
-        # Optional: exit the script so it doesn't try to continue
-        sys.exit(1) 
+        sys.exit(1)
+        print(f"🚀 Success! Charts generated for {ticker} in /visualizations")
+        
