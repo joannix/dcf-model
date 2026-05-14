@@ -6,7 +6,7 @@ import os
 import time
 import yfinance as yf
 
-# --- 1. THE CONVERTER (Moved inside here) ---
+# --- 1. THE CONVERTER ---
 
 def convert_json_to_csv(ticker, folder):
     """Reads data.json and creates CSVs ONLY for financial statements"""
@@ -51,7 +51,6 @@ def convert_json_to_csv(ticker, folder):
 
 def fetch_financials(ticker, apikey, folder):
     """Fetches data from API and saves it to a ticker-specific folder"""
-    # 🛡️ THE AUTO-CREATE LOGIC IS HERE:
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True)
         print(f"📂 Created new directory: {folder}")

@@ -10,7 +10,7 @@ from modeling.dcf import (enterprise_value, load_user_assumptions, run_sensitivi
 load_dotenv()  
 ENV_API_KEY = os.getenv("FMP_API_KEY")
 
-# --- HELPER: LOADS DATA FROM STAGE 1 ---
+# --- HELPER: LOADS DATA ---
 def load_local_data(ticker, folder):
     path = os.path.join(folder, "data.json")
     if os.path.exists(path):
@@ -95,11 +95,8 @@ def main():
         # Extract the key values
         debt = float(bal_stmt.get('totalDebt', 0))
         cash = float(bal_stmt.get('cashAndCashEquivalents', 0))
-        
-        # Get shares from the EV statement
         shares_outstanding = float(ev_stmt.get('numberOfShares', 0))
         
-        # Calculate values
         equity_val = results['ev'] - debt + cash
 
         # SAFETY CHECK: Prevent dividing by zero

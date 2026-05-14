@@ -12,20 +12,15 @@ def ulFCF(ebit, tax_rate, da, cwc, capex):
 def enterprise_value(income_statement, cashflow_statement, balance_statement, period, discount_rate, earnings_growth_rate, cap_ex_growth_rate, perpetual_growth_rate, assumptions):
     """Calculates Enterprise Value using DCF method"""
     
-    # 1. Base Metrics (Fixing Order: Define variables before using them)
+    # 1. Base Metrics 
     base_revenue = float(income_statement[0].get('revenue', 0))
     base_ebit = float(income_statement[0].get('ebit', 0))
     base_margin = base_ebit / base_revenue if base_revenue > 0 else 0.1
-    
-    # Define ebt and tax_exp BEFORE calculating tax_rate
     ebt = float(income_statement[0].get('incomeBeforeTax', 1))
     tax_exp = float(income_statement[0].get('incomeTaxExpense', 0))
     tax_rate = tax_exp / ebt if ebt > 0 else 0.21
-    
     da = float(cashflow_statement[0].get('depreciationAndAmortization', 0))
     capex = float(cashflow_statement[0].get('capitalExpenditure', 0))
-       
-    # Use base_revenue (not revenue) for CWC proxy
     cwc_base = base_revenue * 0.01 
 
     projection_data = []
@@ -43,7 +38,6 @@ def enterprise_value(income_statement, cashflow_statement, balance_statement, pe
         # Using revenue_growth from assumptions
         rev_growth = assumptions.get('revenue_growth', earnings_growth_rate)
         yr_rev = base_revenue * ((1 + rev_growth) ** yr)
-        
         yr_ebit = yr_rev * forecast_margin
         
         # Keep DA and CapEx scaling with revenue growth
@@ -64,13 +58,12 @@ def enterprise_value(income_statement, cashflow_statement, balance_statement, pe
             "PV_of_FCF": round(pv_fcf, 2)
         })
 
-    # 3. Terminal Value (Stage 2)
+    # 3. Terminal Value
     final_fcf = projection_data[-1]["FCF"]
     terminal_value = (final_fcf * (1 + perpetual_growth_rate)) / (discount_rate - perpetual_growth_rate)
     pv_terminal_value = terminal_value / ((1 + discount_rate) ** period)
     
     pv_sum_of_forecast = sum(pv_fcf_list)
-    
     final_enterprise_value = pv_sum_of_forecast + pv_terminal_value
     
     # PREPARE LISTS FOR CHARTS
@@ -161,7 +154,6 @@ def load_user_assumptions(ticker, folder):
         
         assumptions_dict = dict(zip(df['Assumption'], df['Value']))
         
-        # 🛡️ THE FIX: Add the name we found earlier to this dictionary
         assumptions_dict['company_full_name'] = display_name
         
         return assumptions_dict
