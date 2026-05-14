@@ -4,8 +4,9 @@ import json
 import pandas as pd
 import os
 import time
+import yfinance as yf
 
-# --- 1. THE CONVERTER (Moved inside here) ---
+# --- 1. THE CONVERTER ---
 
 def convert_json_to_csv(ticker, folder):
     """Reads data.json and creates CSVs ONLY for financial statements"""
@@ -50,7 +51,6 @@ def convert_json_to_csv(ticker, folder):
 
 def fetch_financials(ticker, apikey, folder):
     """Fetches data from API and saves it to a ticker-specific folder"""
-    # 🛡️ THE AUTO-CREATE LOGIC IS HERE:
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True)
         print(f"📂 Created new directory: {folder}")
@@ -85,6 +85,24 @@ def fetch_financials(ticker, apikey, folder):
         json.dump(master_data, f, indent=4)
     
     return master_data
+
+import yfinance as yf
+
+def get_market_data(ticker_symbol):
+    stock = yf.Ticker(ticker_symbol)
+    
+    info = stock.info
+    full_name = info.get('longName', ticker_symbol)
+    current_price = info.get('currentPrice') or info.get('regularMarketPrice')
+    
+    history_df = stock.history(period="5y")
+    history_list = history_df['Close'].tolist()
+    
+    return {
+        "full_name": full_name,
+        "current_price": current_price,
+        "history": history_list
+    }
 
 # --- 3. THE TEMPLATER ---
 

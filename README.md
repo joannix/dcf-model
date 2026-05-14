@@ -19,30 +19,33 @@ Where:
     This allows the user to model operational improvements (efficiency gains) or headwinds over the forecast period.
 * **Tax Rate (t)**: Calculated as a historical effective rate ($Income\ Tax\ Expense / EBT$).
 * **D&A & NWC**: Scaled inline with **Revenue Growth** to maintain operational intensity.
-* **CapEx**: Scaled independently using the specific `capex_growth` assumption, allowing for modeling of capital-heavy expansion or maintenance-only phases.
+* **CapEx**: Scaled independently using the specific `capex_growth` assumption.
 
 #### Terminal Value:
 We apply the **Gordon Growth Method** to the final projected year:
 $$TV = \frac{FCF_{n} \times (1 + g)}{(WACC - g)}$$
 
 ## 🚀 Key Features
-* **Automated Data Fetching**: Pulls Income Statements, Balance Sheets, and Cash Flows.
+* **Hybrid Data Fetching**: Combined API power for financial statements with yfinance for real-time historical price tracking.* 
 * **Equity Bridge**: Moves from Enterprise Value to Equity Value by adjusting for Debt and Cash.
-* **Visualization Suite**: Generates Bar Charts for Cash Flows and Waterfall Charts for Valuation Bridges.
+* **Visualization Suite**: Generates Seaborn-powered charts.
 * **Resilient Logic**: Automatic fallback to filing data if live quotes are restricted.
 
 ## 📂 Project Structure
 Data is organized by ticker within the output directory:
 - `output/<ticker>/data.json` — Raw API response
+- `output/<ticker>/chart_data.json` - Processed data for visualization scripts
 - `output/<ticker>/assumptions_<ticker>.csv` — **User-editable** inputs
 - `output/<ticker>/valuation_output_<ticker>.csv` — Final report
 
 Charts are organized by ticker within the visualizations directory:
+- `visualizations/<ticker>/market_comparison.png` - Historical price vs. intrinsic value
+- `visualizations/<ticker>/ebit_growth.png` - Historical actuals vs. forecasted EBIT
 - `visualizations/<ticker>/projections.png` — Bar Charts for Cash Flows
 - `visualizations/<ticker>/valuation_bridge.png` — Waterfall Chart for Valuation Bridge
 
 ## ⚙️ Configuration
-To keep your credentials secure, this engine uses a `.env` file.
+The engine uses `.env` file for credentials.
 
 1. Create a file named `.env` in the root directory.
 2. Add your Financial Modeling Prep API key:

@@ -4,13 +4,13 @@ import argparse
 import pandas as pd
 from dotenv import load_dotenv
 
-from modeling.data import fetch_financials, convert_json_to_csv, create_assumption_template
-from modeling.dcf import enterprise_value, load_user_assumptions, run_sensitivity_analysis
+from modeling.data import (fetch_financials, convert_json_to_csv, create_assumption_template, get_market_data)
+from modeling.dcf import (enterprise_value, load_user_assumptions, run_sensitivity_analysis)
 
 load_dotenv()  
 ENV_API_KEY = os.getenv("FMP_API_KEY")
 
-# --- HELPER: LOADS DATA FROM STAGE 1 ---
+# --- HELPER: LOADS DATA ---
 def load_local_data(ticker, folder):
     path = os.path.join(folder, "data.json")
     if os.path.exists(path):
@@ -44,16 +44,15 @@ def main():
         print(f"--- 🛠️ STAGE 1: SETUP MODE ({ticker}) ---")
         
         master_data = fetch_financials(ticker, active_api_key, output_folder)
-        
+        yf_data = get_market_data(ticker)
+        full_name = yf_data.get('full_name', ticker)
         profile_data = master_data.get('profile', [])
-        print(f"DEBUG: Raw Profile Data: {profile_data}")
-        full_name = ticker 
-        
-        if profile_data and isinstance(profile_data, list) and len(profile_data) > 0:
-            full_name = profile_data[0].get('companyName', ticker)
-        else: 
-            full_name = ticker
+        if (not full_name or full_name == ticker) and profile_data:
+            if isinstance(profile_data, list) and len(profile_data) > 0:
+                full_name = profile_data[0].get('companyName', ticker)
 
+        print(f"✅ Setup initialized for: {full_name}")
+        
         convert_json_to_csv(ticker, output_folder) 
         create_assumption_template(ticker, output_folder, company_name=full_name)
         
@@ -68,7 +67,8 @@ def main():
         # 1. LOAD DATA & ASSUMPTIONS
         master_data = load_local_data(ticker, output_folder)
         assumptions = load_user_assumptions(ticker, output_folder)
-        full_name = assumptions.get('company_name_display', ticker)
+        yf_data = get_market_data(ticker)
+        full_name = yf_data.get('full_name', ticker)
         print(f"✅ Valuation for: {full_name}")
             
         if not master_data or not assumptions:
@@ -88,18 +88,15 @@ def main():
             assumptions=assumptions                             #
         )
 
-        # --- 3. EQUITY BRIDGE ---
+        # 3. EQUITY BRIDGE
         bal_stmt = master_data['balance_statement'][0]
         ev_stmt = master_data['enterprise_value_statement'][0]
             
         # Extract the key values
         debt = float(bal_stmt.get('totalDebt', 0))
         cash = float(bal_stmt.get('cashAndCashEquivalents', 0))
-        
-        # Get shares from the EV statement
         shares_outstanding = float(ev_stmt.get('numberOfShares', 0))
         
-        # Calculate values
         equity_val = results['ev'] - debt + cash
 
         # SAFETY CHECK: Prevent dividing by zero
@@ -110,27 +107,24 @@ def main():
             intrinsic_price = 0
 
         # 4. GET MARKET PRICE AND DATE
-        quote_data = master_data.get('quote', [])
+        
+        market_price = yf_data['current_price']
+        company_name = yf_data['full_name']
         ev_data = master_data.get('enterprise_value_statement', [])
-        
-        market_price = 0.0
-        price_source = "Not found"
+        price_source = "Yahoo Finance (Live)"
 
-        # Try live quote first
-        if isinstance(quote_data, list) and len(quote_data) > 0:
-            market_price = float(quote_data[0].get('price', 0))
-            price_source = "Live Quote"
-        
         # Fallback to last known price from EV statement
         if market_price == 0.0 and isinstance(ev_data, list) and len(ev_data) > 0:
             market_price = float(ev_data[0].get('stockPrice', 0))
-            price_source = "Last Filing Data (Live Quote Restricted)"
+            price_source = "FMP Filing Data (Last Fiscal Year)"
+        elif market_price == 0.0:
+            price_source = "Unknown (Data Unavailable)"
 
         # 5. DISPLAY MAIN REPORT
         metadata = master_data.get('metadata', {})
         price_date = metadata.get('retrieved_at', 'Unknown')
         print("\n" + "="*45)
-        print(f"  🏢 DCF VALUATION REPORT: {ticker}")
+        print(f"  🏢 DCF VALUATION REPORT: {full_name}")
         print(f"  📅 Data Captured: {price_date}")
         print(f"  🔍 Price Source:  {price_source}") # Tells you where the price came from
         print("="*45)
@@ -146,8 +140,9 @@ def main():
         print(f"  ✨ INTRINSIC PRICE:    ${intrinsic_price:.2f}")
         print(f"  📉 MARKET PRICE:       ${market_price:.2f}")
         
+        upside = 0.0
         if market_price > 0:
-            upside = ((intrinsic_price / market_price) - 1) * 100
+            upside = (intrinsic_price / market_price) - 1
             print(f"  🚀 UPSIDE/(DOWNSIDE):  {upside:.2f}%")
         print("="*45)
        
@@ -198,24 +193,32 @@ def main():
             
         print(f"✅ Report saved to: {save_path}")
        
-        # --- 6. DATA FOR CHARTS ---
+        # 8. DATA FOR CHARTS
         chart_data = {
             "ticker": ticker,
+            "company_name": yf_data['full_name'],
+            "intrinsic_price": intrinsic_price,
+            "market_price": yf_data['current_price'],
+            "upside": upside,
+            "ev": results['ev'],
             "ebit_history": results['ebit_history'],
             "ebit_hist_years": results['ebit_hist_years'],
-            "ebit_forecast": results['ebit_forecast'],
+            "ebit_forecast": results['ebit_forecast'].tolist() if hasattr(results['ebit_forecast'], 'tolist') else results['ebit_forecast'],
             "ebit_forecast_years": results['ebit_forecast_years'],
-            "forecast_years": results.get('years', ["Y1", "Y2", "Y3", "Y4", "Y5"]),
+            "forecast_years": results['ebit_forecast_years'],
+            "forecast_fcf": results.get('fcf_projections', [0]*5).tolist() if hasattr(results.get('fcf_projections'), 'tolist') else results.get('fcf_projections'),         
+            "ebit_forecast_years": results['ebit_forecast_years'],
             "forecast_fcf": results.get('fcf_projections', [0, 0, 0, 0, 0]),
             "pv_forecast_sum": results.get('pv_sum', 0),
             "pv_terminal_value": results.get('pv_tv', 0),
             "cash": cash,
             "debt": debt,
-            "equity_value": equity_val
+            "equity_value": equity_val,
+            "price_history": yf_data['history']
         }
         
-        with open(os.path.join(output_folder, "chart_data.json"), 'w') as jf:
-            json.dump(chart_data, jf, indent=4) 
+        with open(f"output/{ticker}/chart_data.json", 'w') as f:
+            json.dump(chart_data, f)
             print(f"✅ Chart data prepared at: {os.path.join(output_folder, 'chart_data.json')}")
 
 if __name__ == "__main__":
