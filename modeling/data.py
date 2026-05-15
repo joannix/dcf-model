@@ -113,9 +113,9 @@ def create_assumption_template(ticker, output_folder, company_name="Unknown"):
         return
 
     data = {
-        "Assumption": ["revenue_growth", "ebit_margin_delta", "capex_growth", "wacc", "perpetual_growth", "forecast_years"],
-        "Value": [0.05, 0.0, 0.05, 0.085, 0.02, 5],
-        "Description": ["revenue growth", "EBIT margin delta", "CapEx growth", "WACC", "Terminal Growth", "Years"]
+        "Assumption": ["revenue_growth", "ebit_margin_delta", "capex_delta", "wacc", "perpetual_growth", "forecast_years"],
+        "Value": [0.05, 0.0, 0.00, 0.085, 0.02, 5],
+        "Description": ["revenue growth", "EBIT margin delta", "CapEx growth relative to revenue growth", "WACC", "Terminal Growth Rate", "Forecast Period"]
     }
     df = pd.DataFrame(data)
 

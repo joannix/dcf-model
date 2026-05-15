@@ -83,7 +83,7 @@ def main():
             period=int(assumptions['forecast_years']),
             discount_rate=assumptions['wacc'],
             earnings_growth_rate=assumptions['revenue_growth'],
-            cap_ex_growth_rate=assumptions['capex_growth'],
+            capex_growth_rate=assumptions['capex_delta'],
             perpetual_growth_rate=assumptions['perpetual_growth'],
             assumptions=assumptions                             #
         )

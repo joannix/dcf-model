@@ -9,7 +9,7 @@ def ulFCF(ebit, tax_rate, da, cwc, capex):
     return ebit * (1 - tax_rate) + da - cwc - abs(capex)
 
 # --- 2 CORE ENGINE ---
-def enterprise_value(income_statement, cashflow_statement, balance_statement, period, discount_rate, earnings_growth_rate, cap_ex_growth_rate, perpetual_growth_rate, assumptions):
+def enterprise_value(income_statement, cashflow_statement, balance_statement, period, discount_rate, earnings_growth_rate, capex_growth_rate, perpetual_growth_rate, assumptions):
     """Calculates Enterprise Value using DCF method"""
     
     # 1. Base Metrics 
@@ -18,9 +18,13 @@ def enterprise_value(income_statement, cashflow_statement, balance_statement, pe
     base_margin = base_ebit / base_revenue if base_revenue > 0 else 0.1
     ebt = float(income_statement[0].get('incomeBeforeTax', 1))
     tax_exp = float(income_statement[0].get('incomeTaxExpense', 0))
-    tax_rate = tax_exp / ebt if ebt > 0 else 0.21
+    raw_tax_rate = tax_exp / ebt if ebt > 0 else 0.21
+    tax_rate = min(max(raw_tax_rate, 0.15), 0.25)
     da = float(cashflow_statement[0].get('depreciationAndAmortization', 0))
     capex = float(cashflow_statement[0].get('capitalExpenditure', 0))
+    da = abs(da)
+    da_catchup = 0.10
+    capex = abs(capex)
     cwc_base = base_revenue * 0.01 
 
     projection_data = []
@@ -38,13 +42,15 @@ def enterprise_value(income_statement, cashflow_statement, balance_statement, pe
         # Using revenue_growth from assumptions
         rev_growth = assumptions.get('revenue_growth', earnings_growth_rate)
         yr_rev = base_revenue * ((1 + rev_growth) ** yr)
-        yr_ebit = yr_rev * forecast_margin
-        
-        # Keep DA and CapEx scaling with revenue growth
-        yr_da = da * ((1 + rev_growth) ** yr)
-        yr_capex = capex * ((1 + cap_ex_growth_rate) ** yr)
-        yr_cwc = cwc_base * ((1 + rev_growth) ** yr)
-        
+        yr_ebit = yr_rev * (base_margin + margin_delta)
+        prev_rev = base_revenue if yr == 1 else projection_data[-1]["Revenue"]
+        capex_delta = assumptions.get('capex_delta', 0) 
+        yr_capex_growth = rev_growth + capex_growth_rate
+        yr_capex = capex * ((1 + yr_capex_growth) ** yr)
+        rev_increase = yr_rev - prev_rev
+        yr_cwc = rev_increase * 0.10
+        yr_da = (da * (1 + rev_growth)**yr) + (yr_capex * da_catchup * (yr/period))
+            
         fcf = ulFCF(yr_ebit, tax_rate, yr_da, yr_cwc, yr_capex)
         pv_fcf = fcf / ((1 + discount_rate) ** yr)
         
@@ -112,7 +118,7 @@ def run_sensitivity_analysis(income_statement, cashflow_statement, balance_state
                 int(assumptions['forecast_years']),   # period
                 w,                                    # discount_rate
                 assumptions.get('revenue_growth', 0.05), # earnings_growth_rate
-                assumptions.get('capex_growth', 0.05),   # cap_ex_growth_rate
+                assumptions.get('capex_growth', 0.05),   # capex_growth_rate
                 g,                                    # perpetual_growth_rate
                 assumptions                           # the actual dictionary
             )
@@ -182,7 +188,7 @@ if __name__ == "__main__":
             period=int(a['forecast_years']),
             discount_rate=a['wacc'],
             earnings_growth_rate=a.get('revenue_growth', 0.05),
-            cap_ex_growth_rate=a['capex_growth'],
+            capex_growth_rate=a['capex_growth'],
             perpetual_growth_rate=a['perpetual_growth'],
             assumptions=a
         )
