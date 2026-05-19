@@ -107,24 +107,54 @@ def get_market_data(ticker_symbol):
 # --- 3. THE TEMPLATER ---
 
 def create_assumption_template(ticker, output_folder, company_name="Unknown"):
-    """Creates the starter CSV for growth and WACC assumptions"""
+    """Creates a wide-format CSV for 10-year dynamic DCF assumptions"""
     assumption_path = os.path.join(output_folder, f"{ticker}_assumptions.csv")
+    
     if os.path.exists(assumption_path):
         return
 
-    data = {
-        "Assumption": ["revenue_growth", "ebit_margin_delta", "capex_delta", "wacc", "perpetual_growth", "forecast_years"],
-        "Value": [0.05, 0.0, 0.00, 0.085, 0.02, 5],
-        "Description": ["revenue growth", "EBIT margin delta", "CapEx growth relative to revenue growth", "WACC", "Terminal Growth Rate", "Forecast Period"]
-    }
-    df = pd.DataFrame(data)
+    # 1. Define the rows (The Metrics)
+    metrics = [
+        "revenue_growth", 
+        "ebit_margin_delta", 
+        "capex_delta", 
+        "wacc", 
+        "perpetual_growth", 
+        "forecast_years"
+    ]
+    
+    # 2. Define the starting/fallback values
+    defaults = [0.05, 0.0, 0.0, 0.085, 0.02, 5]
+    
+    descriptions = [
+        "Annual revenue growth (0.05 = 5%)",
+        "Change to base EBIT margin (0.02 = +2%)",
+        "CapEx adjustment relative to revenue growth",
+        "Discount rate (Constant)",
+        "Terminal growth rate",
+        "Total forecast horizon (Years)"
+    ]
 
+    # 3. Build the Dictionary with 10 Year slots
+    data = {
+        "Assumption": metrics,
+        "Default": defaults
+    }
+    
+    # Add empty slots for Year 1 through Year 10
+    for i in range(1, 11):
+        data[f"Year {i}"] = [""] * len(metrics)
+    
+    data["Description"] = descriptions
+
+    df = pd.DataFrame(data)
+    
     with open(assumption_path, 'w', newline='', encoding='utf-8') as f:
         f.write(f"Company Name;{company_name}\n")
         f.write(f"Ticker;{ticker}\n")
         f.write("\n")
         df.to_csv(f, index=False, sep=';')
-
+        
 # --- 4. LOCAL TESTING BLOCK ---
 
 if __name__ == "__main__":

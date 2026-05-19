@@ -4,77 +4,120 @@ import os
 
 # --- 1 THE MATH ENGINE ---
 
-def ulFCF(ebit, tax_rate, da, cwc, capex):
+def ulFCF(yr_ebit, yr_tax_payment, yr_da, yr_cwc, yr_capex):
     """Calculates Unlevered Free Cash Flow"""
-    return ebit * (1 - tax_rate) + da - cwc - abs(capex)
+    return yr_ebit - yr_tax_payment + yr_da - yr_cwc - yr_capex
+
+#--- THE HELPER ---
+def get_dynamic_assumption(row_data, current_year, default_val):
+    """Iterates from Year 1 up to current year to handle step changes and forward-filling"""
+    last_valid_val = default_val
+    
+    if not isinstance(row_data, dict):
+        return default_val
+
+    for y in range(1, current_year + 1):
+        step_val = row_data.get(f"Year {y}")
+        # Check for both empty strings and NaN values safely
+        if step_val is not None and str(step_val).strip() != "" and not pd.isna(step_val):
+            try:
+                last_valid_val = float(str(step_val).replace(',', '.'))
+            except ValueError:
+                pass
+                
+    return last_valid_val
 
 # --- 2 CORE ENGINE ---
 def enterprise_value(income_statement, cashflow_statement, balance_statement, period, discount_rate, earnings_growth_rate, capex_growth_rate, perpetual_growth_rate, assumptions):
-    """Calculates Enterprise Value using DCF method"""
+    """Calculates Enterprise Value using DCF method over a dynamic time horizon"""
     
-    # 1. Base Metrics 
-    base_revenue = float(income_statement[0].get('revenue', 0))
-    base_ebit = float(income_statement[0].get('ebit', 0))
-    base_margin = base_ebit / base_revenue if base_revenue > 0 else 0.1
-    ebt = float(income_statement[0].get('incomeBeforeTax', 1))
-    tax_exp = float(income_statement[0].get('incomeTaxExpense', 0))
-    raw_tax_rate = tax_exp / ebt if ebt > 0 else 0.21
-    tax_rate = min(max(raw_tax_rate, 0.15), 0.25)
-    da = float(cashflow_statement[0].get('depreciationAndAmortization', 0))
-    capex = float(cashflow_statement[0].get('capitalExpenditure', 0))
-    da = abs(da)
-    da_catchup = 0.10
-    capex = abs(capex)
-    cwc_base = base_revenue * 0.01 
-
     projection_data = []
     pv_fcf_list = []
 
-    # 2. History & Margin Logic
-    hist_ebit = [float(item.get('ebit', 0)) for item in reversed(income_statement[:5])]
-    hist_years = [item.get('date')[:4] for item in reversed(income_statement[:5])]
+    # 1. Establish the Anchor Year from the latest Income Statement entry
+    latest_inc_entry = income_statement[0]
+    target_year = latest_inc_entry.get('calendarYear')
     
-    # Use the delta from assumptions
-    margin_delta = assumptions.get('ebit_margin_delta', 0)
-    forecast_margin = base_margin + margin_delta
+    # Base Income Statement Metrics
+    base_revenue = float(latest_inc_entry.get('revenue', 0))
+    base_ebit = float(latest_inc_entry.get('ebit', 0))
+    base_margin = base_ebit / base_revenue if base_revenue > 0 else 0.0
+    
+    tax_exp_entry = next((item for item in income_statement if item.get('calendarYear') == target_year), latest_inc_entry)
+    tax_exp = float(tax_exp_entry.get('incomeTaxExpense', 0))
+    raw_tax_rate = tax_exp / base_ebit if base_ebit > 0 else 0.21
+    tax_rate = min(max(raw_tax_rate, 0.15), 0.25)
+    
+    # 4. Extract Cash Flow Metrics
+    latest_cf_entry = next((item for item in cashflow_statement if item.get('calendarYear') == target_year), cashflow_statement[0])
+    da = abs(float(latest_cf_entry.get('depreciationAndAmortization', 0)))
+    capex = abs(float(latest_cf_entry.get('capitalExpenditure', 0)))
+    da_catchup = 0.10
+    
+    # Extract dynamic horizon from assumptions file safely
+    forecast_years = int(period)
 
-    for yr in range(1, period + 1):
-        # Using revenue_growth from assumptions
-        rev_growth = assumptions.get('revenue_growth', earnings_growth_rate)
-        yr_rev = base_revenue * ((1 + rev_growth) ** yr)
-        yr_ebit = yr_rev * (base_margin + margin_delta)
+    # Core forecasting loop using dynamic step assumptions
+    for yr in range(1, forecast_years + 1):
+        rev_row = assumptions.get('revenue_growth', {})
+        margin_row = assumptions.get('ebit_margin_delta', {})
+        capex_row = assumptions.get('capex_delta', {})
+
+        try:
+            default_rev = float(str(rev_row.get('Default', 0.05)).replace(',', '.'))
+            default_margin = float(str(margin_row.get('Default', 0.0)).replace(',', '.'))
+            default_capex = float(str(capex_row.get('Default', 0.0)).replace(',', '.'))
+        except ValueError:
+            default_rev, default_margin, default_capex = 0.05, 0.0, 0.0
+
+        rev_growth = get_dynamic_assumption(rev_row, yr, default_rev)
+        margin_delta = get_dynamic_assumption(margin_row, yr, default_margin)
+        capex_delta = get_dynamic_assumption(capex_row, yr, default_capex)
+
+        # Compound revenue, apply structural margin adjustments
         prev_rev = base_revenue if yr == 1 else projection_data[-1]["Revenue"]
-        capex_delta = assumptions.get('capex_delta', 0) 
-        yr_capex_growth = rev_growth + capex_growth_rate
-        yr_capex = capex * ((1 + yr_capex_growth) ** yr)
-        rev_increase = yr_rev - prev_rev
-        yr_cwc = rev_increase * 0.10
-        yr_da = (da * (1 + rev_growth)**yr) + (yr_capex * da_catchup * (yr/period))
+        yr_rev = prev_rev * (1 + rev_growth)
+        yr_ebit = yr_rev * (base_margin + margin_delta)
+        yr_tax_payment = max(0, yr_ebit * tax_rate)
+        yr_ebit_after_tax = yr_ebit - yr_tax_payment
+        prev_capex = capex if yr == 1 else projection_data[-1]["CapEx"]
+        yr_capex = prev_capex * (1 + rev_growth + capex_delta)
+                
+        yr_cwc = (yr_rev - prev_rev) * 0.10
+        prev_da = da if yr == 1 else projection_data[-1]["D&A"]
+        yr_da = (prev_da * (1 + rev_growth)) + (yr_capex * da_catchup * (yr / forecast_years))
             
-        fcf = ulFCF(yr_ebit, tax_rate, yr_da, yr_cwc, yr_capex)
+        fcf = ulFCF(yr_ebit, yr_tax_payment, yr_da, yr_cwc, yr_capex)
         pv_fcf = fcf / ((1 + discount_rate) ** yr)
         
         pv_fcf_list.append(pv_fcf)
         projection_data.append({
             "Year": yr,
-            "Revenue": round(yr_rev, 2),
-            "EBIT": round(yr_ebit, 2),
-            "EBIT_Margin_%": round((yr_ebit / yr_rev) * 100, 2) if yr_rev > 0 else 0,
-            "FCF": round(fcf, 2),
-            "PV_of_FCF": round(pv_fcf, 2)
+            "Revenue": yr_rev,
+            "EBIT": yr_ebit,
+            "EBIT_After_Tax": yr_ebit_after_tax,
+            "CapEx": yr_capex,
+            "D&A": yr_da,
+            "NWC_Change": yr_cwc,
+            "FCF": fcf,
+            "PV_of_FCF": pv_fcf
         })
-
-    # 3. Terminal Value
+ 
+    # Terminal Value Calculation
     final_fcf = projection_data[-1]["FCF"]
     terminal_value = (final_fcf * (1 + perpetual_growth_rate)) / (discount_rate - perpetual_growth_rate)
-    pv_terminal_value = terminal_value / ((1 + discount_rate) ** period)
+    pv_terminal_value = terminal_value / ((1 + discount_rate) ** forecast_years)
     
     pv_sum_of_forecast = sum(pv_fcf_list)
     final_enterprise_value = pv_sum_of_forecast + pv_terminal_value
+    if final_enterprise_value < 0:
+        final_enterprise_value = 0.0
     
-    # PREPARE LISTS FOR CHARTS
+    # Prepare historical data frames for frontend components
     fcf_only_list = [item["FCF"] for item in projection_data]
     years_labels = [f"Year {item['Year']}" for item in projection_data]
+    hist_ebit = [float(item.get('ebit', 0)) for item in reversed(income_statement[:5])]
+    hist_years = [str(item.get('date', '0000'))[:4] for item in reversed(income_statement[:5])]
 
     return {
         "ev": final_enterprise_value,
@@ -87,123 +130,90 @@ def enterprise_value(income_statement, cashflow_statement, balance_statement, pe
         "ebit_history": hist_ebit,
         "ebit_hist_years": hist_years,
         "ebit_forecast": [item["EBIT"] for item in projection_data],
-        "ebit_forecast_years": [f"{int(hist_years[-1])+i}E" for i in range(1, period+1)]
+        "ebit_forecast_years": [f"{int(hist_years[-1])+i}E" if hist_years else f"Yr{i}E" for i in range(1, forecast_years + 1)]
     }
+
+def check_model_integrity(projection_data):
+    """Checks if the DCF assumptions lead to a 'broken' business case"""
+    negative_fcf_years = [item['Year'] for item in projection_data if item['FCF'] < 0]
+    
+    if len(negative_fcf_years) == len(projection_data):
+        print("⚠️ WARNING: FCF is negative throughout the entire forecast. DCF may not be appropriate.")
+    elif len(negative_fcf_years) > (len(projection_data) / 2):
+        print(f"💡 NOTE: Company is FCF negative for {len(negative_fcf_years)} years. Check turnaround realities.")
 
 # --- 3 SENSITIVITY ENGINE ---
 def run_sensitivity_analysis(income_statement, cashflow_statement, balance_statement, assumptions, debt, cash, shares):
-    """
-    Runs multiple DCF scenarios by varying WACC and Perpetual Growth.
-    Returns a DataFrame grid of share prices.
-    """
-    # 1. Define the ranges (Current, -1%, +1% for WACC | Current, -0.5%, +0.5% for Growth)
-    wacc_range = [round(assumptions['wacc'] - 0.01, 3), 
-                  round(assumptions['wacc'], 3), 
-                  round(assumptions['wacc'] + 0.01, 3)]
-    
-    growth_range = [round(assumptions['perpetual_growth'] - 0.005, 3), 
-                    round(assumptions['perpetual_growth'], 3), 
-                    round(assumptions['perpetual_growth'] + 0.005, 3)]
+    """Runs multiple DCF scenarios by varying WACC and Perpetual Growth variables safely"""
+    try:
+        base_wacc = float(str(assumptions.get('wacc', {}).get('Default', 0.085)).replace(',', '.'))
+        base_g = float(str(assumptions.get('perpetual_growth', {}).get('Default', 0.02)).replace(',', '.'))
+        forecast_years = int(float(assumptions.get('forecast_years', {}).get('Default', 5)))
+    except (ValueError, TypeError):
+        base_wacc, base_g, forecast_years = 0.085, 0.02, 5
+
+    wacc_range = [round(base_wacc - 0.01, 3), round(base_wacc, 3), round(base_wacc + 0.01, 3)]
+    growth_range = [round(base_g - 0.005, 3), round(base_g, 3), round(base_g + 0.005, 3)]
     
     results_grid = []
 
-    # 2. Nested loop to calculate every combination
     for w in wacc_range:
         row = {"WACC / Growth": f"{w*100:.1f}%"}
         for g in growth_range:
             res = enterprise_value(
-                income_statement, 
-                cashflow_statement, 
-                balance_statement,
-                int(assumptions['forecast_years']),   # period
-                w,                                    # discount_rate
-                assumptions.get('revenue_growth', 0.05), # earnings_growth_rate
-                assumptions.get('capex_growth', 0.05),   # capex_growth_rate
-                g,                                    # perpetual_growth_rate
-                assumptions                           # the actual dictionary
+                income_statement=income_statement, 
+                cashflow_statement=cashflow_statement, 
+                balance_statement=balance_statement,
+                period=forecast_years,
+                discount_rate=w,
+                earnings_growth_rate=assumptions.get('revenue_growth', {}),
+                capex_growth_rate=assumptions.get('capex_delta', {}),
+                perpetual_growth_rate=g,
+                assumptions=assumptions
             )
             
-            price = (res['ev'] - debt + cash) / shares
+            price = (res['ev'] - debt + cash) / shares if shares > 0 else 0.0
             row[f"{g*100:.1f}%"] = round(price, 2)
         
         results_grid.append(row)
 
-    # 3. Convert list of dicts to a clean table
     return pd.DataFrame(results_grid)
 
 # --- 4 DATA LOADERS ---
 def load_user_assumptions(ticker, folder):
-    """The Smart Socket for Polish Excel Files"""
+    """The Wide Matrix Loader for Horizontal 10-Year DCF Spreadsheets"""
     path = os.path.join(folder, f"{ticker}_assumptions.csv")
     if not os.path.exists(path):
         print(f"❌ Error: {path} not found.")
         return None
     
-    display_name = ticker # Default
+    display_name = ticker
     try:
         with open(path, 'r', encoding='utf-8') as f:
             first_line = f.readline()
             if "Company Name" in first_line:
-                # Splits "Company Name;The Boeing Company" and takes the second part
                 display_name = first_line.split(';')[1].strip()
     except Exception as e:
         print(f"⚠️ Could not read display name from header: {e}")
         
     try:
-        # Detects semicolon automatically and skips header
         df = pd.read_csv(path, skiprows=3, sep=';', engine='python')
         df.columns = df.columns.str.strip()
         
-        # Convert Polish commas to dots if necessary
-        if df['Value'].dtype == 'object':
-            df['Value'] = df['Value'].str.replace(',', '.').astype(float)
+        df['Assumption'] = df['Assumption'].str.strip()
+        df.set_index("Assumption", inplace=True)
         
-        assumptions_dict = dict(zip(df['Assumption'], df['Value']))
-        
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
+                # Try to safely cast numeric columns back to float values
+                df[col] = pd.to_numeric(df[col], errors='ignore')
+
+        assumptions_dict = df.to_dict(orient="index")
         assumptions_dict['company_full_name'] = display_name
         
         return assumptions_dict
     
     except Exception as e:
-        print(f"❌ Error reading assumptions: {e}")
+        print(f"❌ Error reading assumptions matrix: {e}")
         return None
-
-# --- 5 EXECUTION BLOCK ---
-
-if __name__ == "__main__":
-    ticker = 'AMZN'
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    folder = os.path.join(script_dir, f"{ticker}_financials")
-
-    a = load_user_assumptions(ticker, folder)
-
-    if a:
-        with open(os.path.join(script_dir, 'data.json'), 'r') as f:
-            master_data = json.load(f)
-
-        results = enterprise_value(
-            master_data['income_statement'],
-            master_data['cashflow_statement'],
-            master_data['balance_statement'],
-            period=int(a['forecast_years']),
-            discount_rate=a['wacc'],
-            earnings_growth_rate=a.get('revenue_growth', 0.05),
-            capex_growth_rate=a['capex_growth'],
-            perpetual_growth_rate=a['perpetual_growth'],
-            assumptions=a
-        )
-
-        # Equity Bridge
-        bal_stmt = master_data['balance_statement'][0] # Source of Truth for Debt/Cash
-        ev_stmt = master_data['enterprise_value_statement'][0] # Source of Truth for Shares
-        # Pull from Balance Sheet
-        debt = float(bal_stmt.get('totalDebt', 0))
-        cash = float(bal_stmt.get('cashAndCashEquivalents', 0))
-        
-        # Pull from EV Statement
-        shares = float(ev_stmt.get('numberOfShares', 1))
-        
-        # Calculate
-        equity_val = results['ev'] - debt + cash
-        intrinsic_price = equity_val / shares
-       
