@@ -60,6 +60,34 @@ def main():
         print(f"👉 Edit '{ticker}_assumptions.csv' and save your changes.")
         print(f"🚀 When ready, run: python run_my_dcf.py --t {ticker} --mode run")
 
+        chart_data_path = os.path.join(output_folder, "chart_data.json")
+        
+        if os.path.exists(chart_data_path):
+            print(f"🔄 chart_data.json found. Refreshing latest market prices...")
+            with open(chart_data_path, 'r') as json_file:
+                try:
+                    chart_data = json.load(json_file)
+                except Exception:
+                    chart_data = {}
+           
+            hist_df = yf_data.get('history_df')
+            if hist_df is not None and not hist_df.empty:
+                price_history_payload = [
+                    {"date": str(idx.date()), "close": float(row['Close'])} 
+                    for idx, row in hist_df.iterrows()
+                ]
+            else:
+                price_history_payload = []
+         
+            chart_data["market_price"] = yf_data.get('current_price')
+            chart_data["price_history"] = price_history_payload
+           
+            if chart_data.get("intrinsic_price") and chart_data.get("market_price"):
+                chart_data["upside"] = (chart_data["intrinsic_price"] / chart_data["market_price"]) - 1
+          
+            with open(chart_data_path, 'w') as json_file:
+                json.dump(chart_data, json_file, indent=4)
+           
     # --- STAGE 2: RUN ---
     elif args.mode == 'run':
         print(f"--- 🧮 STAGE 2: VALUATION MODE ({ticker}) ---")
@@ -88,6 +116,8 @@ def main():
             assumptions=assumptions
         )
 
+        projections_df = results['projections']
+        
         # 3. EQUITY BRIDGE
         bal_stmt = master_data['balance_statement'][0]
         ev_stmt = master_data['enterprise_value_statement'][0]
@@ -204,6 +234,15 @@ def main():
        
         # 8. DATA FOR CHARTS (Standardized dictionary bindings)
         raw_fcf = results.get('fcf_projections', [0, 0, 0, 0, 0])
+        hist_df = yf_data.get('history_df')
+        if hist_df is not None and not hist_df.empty:
+            price_history_payload = [
+                {"date": str(idx.date()), "close": float(row['Close'])} 
+                for idx, row in hist_df.iterrows()
+            ]
+        else:
+            price_history_payload = []
+
         chart_data = {
             "ticker": ticker,
             "company_name": full_name,
@@ -213,20 +252,21 @@ def main():
             "ev": results['ev'],
             "ebit_history": results['ebit_history'],
             "ebit_hist_years": results['ebit_hist_years'],
+            "projections": projections_df.to_dict(orient='records'),
             "ebit_forecast": results['ebit_forecast'],
             "ebit_forecast_years": results['ebit_forecast_years'],
-            "forecast_fcf": raw_fcf.tolist() if hasattr(raw_fcf, 'tolist') else list(raw_fcf),
             "pv_forecast_sum": results.get('pv_sum', 0),
             "pv_terminal_value": results.get('pv_tv', 0),
             "cash": cash,
             "debt": debt,
             "equity_value": equity_val,
-            "price_history": yf_data.get('history', [])
+            "price_history": yf_data.get('history', []),
+            "price_history": price_history_payload
         }
         
         chart_data_path = os.path.join(output_folder, "chart_data.json")
-        with open(chart_data_path, 'w') as f:
-            json.dump(chart_data, f, indent=4)
+        with open(chart_data_path, 'w') as json_file:
+            json.dump(chart_data, json_file, indent=4)
             print(f"✅ Chart data prepared at: {chart_data_path}")
 
 if __name__ == "__main__":
