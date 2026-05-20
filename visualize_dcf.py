@@ -90,22 +90,30 @@ def save_valuation_bridge(ticker, pv_forecast, pv_tv, cash, debt):
 
 def plot_price_vs_target(ticker, historical_prices, target_price):
     """
-    Visualizes the stock's historical journey compared to our DCF target.
-    historical_prices: A list or Series of past closing prices
-    target_price: The intrinsic value
+    Visualizes the stock's historical journey compared to the intrinsic price.
     """
+    if not historical_prices:
+        return
+    
     sns.set_theme(style="darkgrid")
     plt.figure(figsize=(10, 6))
     
-    # Plot historical line
-    plt.plot(historical_prices, label='Market Price', color='royalblue', linewidth=2)
+    # 1. Parse the JSON list of dicts into dates and prices
+    dates = [pd.to_datetime(item['date']) for item in historical_prices]
+    prices = [item['close'] for item in historical_prices]
     
-    # Plot horizontal "Intrinsic Value" line
+    # 2. Plot historical market line using true dates for the X-axis
+    plt.plot(dates, prices, label='Market Price', color='royalblue', linewidth=2)
+    
+    # 3. Plot horizontal "Intrinsic Value" line across the time horizon
     plt.axhline(y=target_price, color='crimson', linestyle='--', label=f'Target: ${target_price:.2f}')
     
-    plt.title(f"${ticker} Market History vs. DCF Intrinsic Value")
-    plt.xlabel("Days (Last 5 Years)")
-    plt.ylabel("Price ($)")
+    plt.title(f"${ticker} Market History vs. DCF Intrinsic Value", fontsize=14, fontweight='bold', pad=15)
+    plt.xlabel("Date", fontsize=12)
+    plt.ylabel("Price ($)", fontsize=12)
+    
+    # Clean up the date labels on X-axis so they don't overlap
+    plt.gcf().autofmt_xdate() 
     plt.legend()
 
     plt.savefig(os.path.join(get_output_path(ticker), "market_comparison.png"), dpi=300)
@@ -130,7 +138,16 @@ if __name__ == "__main__":
         
         print(f"✅ Real data loaded for {ticker}")
 
-        save_projections(ticker, data['forecast_years'], data['forecast_fcf'])
+        forecast_years_list = data.get('ebit_forecast_years', [])
+        
+        if 'projections' in data:
+            forecast_fcf_list = [row['FCF'] for row in data['projections']]
+        else:
+            forecast_fcf_list = []
+
+        forecast_years_list = [str(y).replace('E', '') for y in forecast_years_list]
+        
+        save_projections(ticker, forecast_years_list, forecast_fcf_list)
         
         save_valuation_bridge(ticker, data['pv_forecast_sum'], data['pv_terminal_value'], data['cash'], data['debt'])
         
@@ -154,5 +171,4 @@ if __name__ == "__main__":
     else:
         print(f"❌ No data found for {ticker}. Run the valuation first.")
         sys.exit(1)
-        print(f"🚀 Success! Charts generated for {ticker} in /visualizations")
         

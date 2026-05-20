@@ -101,7 +101,8 @@ def get_market_data(ticker_symbol):
     return {
         "full_name": full_name,
         "current_price": current_price,
-        "history": history_list
+        "history": history_list,
+        "history_df": history_df
     }
 
 # --- 3. THE TEMPLATER ---
